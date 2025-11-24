@@ -1,4 +1,4 @@
-```
+```mermaid
 erDiagram
     USERS ||--o{ USER_SESSIONS : has
     USERS ||--o{ CONVERSATION_PARTICIPANTS : participates
