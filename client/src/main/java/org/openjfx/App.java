@@ -2,8 +2,11 @@ package org.openjfx;
 
 import javafx.application.Application;
 import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
 import javafx.collections.FXCollections;
 import javafx.collections.ListChangeListener;
+import javafx.collections.ObservableList;
+import javafx.collections.transformation.FilteredList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
@@ -23,10 +26,21 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+/**
+ * Main Application Class for the "GroupSpeak" Chat Application.
+ * This class handles the entire UI setup, event handling, and mock data management.
+ * It uses JavaFX for rendering the GUI.
+ */
 public class App extends Application {
 
-    // --- DATA MODELS ---
+    // ==============================================================================================
+    //                                         DATA MODELS
+    // ==============================================================================================
 
+    /**
+     * Represents a single user in the system.
+     * Used for listing participants in groups or selecting users for new chats.
+     */
     private static class User {
         String id;
         String displayName;
@@ -43,6 +57,7 @@ public class App extends Application {
             return displayName;
         }
 
+        // Equals and HashCode are crucial for identifying unique users in Lists (e.g., for selection)
         @Override
         public boolean equals(Object o) {
             if (this == o) return true;
@@ -57,6 +72,9 @@ public class App extends Application {
         }
     }
 
+    /**
+     * Represents the logged-in user's profile details.
+     */
     private static class UserProfile {
         String username;
         String email;
@@ -71,14 +89,18 @@ public class App extends Application {
         }
     }
 
+    /**
+     * Represents a conversation thread (either One-to-One or Group).
+     * This is the item displayed in the sidebar list.
+     */
     private static class Contact {
         String id;
-        String name;
-        String colorHex;
-        Image image;
-        int unreadCount;
-        boolean isGroup;
-        boolean isOnline;
+        String name;        // Name of the person or the group
+        String colorHex;    // Background color for the avatar
+        Image image;        // Optional profile image (currently unused in UI logic)
+        int unreadCount;    // Number of unread messages to display as a badge
+        boolean isGroup;    // True if this is a group chat
+        boolean isOnline;   // Only relevant for 1-on-1 chats
         List<User> participants;
 
         public Contact(String id, String name, String colorHex, Image image, boolean isGroup, boolean isOnline) {
@@ -92,57 +114,71 @@ public class App extends Application {
             this.participants = new ArrayList<>();
         }
 
+        /**
+         * Helper to get a comma-separated string of participant first names.
+         * Used for the subtitle in group chats.
+         */
         public String getParticipantNames() {
             if (participants.isEmpty()) return "";
             return participants.stream()
-                    .map(u -> u.displayName.split(" ")[0]) // First names only for brevity
+                    .map(u -> u.displayName.split(" ")[0]) // Use first names only for brevity
                     .collect(Collectors.joining(", "));
         }
     }
 
-    // --- UI COMPONENTS ---
-    private BorderPane root;
-    private VBox sidebar;
-    private VBox chatView;
-    private VBox placeholderView;
+    // ==============================================================================================
+    //                                       UI COMPONENTS
+    // ==============================================================================================
 
-    private VBox chatArea;
-    private ScrollPane chatScrollPane;
-    private HBox inputArea;
+    private BorderPane root;            // Main layout container
+    private VBox sidebar;               // Left panel containing user list
+    private VBox chatView;              // Center panel for active chat
+    private VBox placeholderView;       // Center panel shown when no chat is selected
+
+    // Chat Area Components
+    private VBox chatArea;              // Container for message bubbles
+    private ScrollPane chatScrollPane;  // Scrollable wrapper for chatArea
+    private HBox inputArea;             // Bottom area with text field and send button
     private TextField messageInput;
-    private VBox contactListContainer;
+    private VBox contactListContainer;  // Container inside the sidebar scroll pane
 
-    // Header Components
+    // Header Components (Top bar of the active chat)
     private Label currentChatLabel;
     private Label currentChatSubtitle;
     private StackPane currentChatAvatarPane;
-    private HBox chatHeaderActions; // Container for top-right buttons
+    private HBox chatHeaderActions;     // Container for action buttons (e.g., Group Info)
 
-    // --- STATE ---
-    private final List<Contact> allContacts = new ArrayList<>();
-    private final List<User> mockAllUsers = new ArrayList<>();
+    // ==============================================================================================
+    //                                          STATE
+    // ==============================================================================================
 
-    private String currentConversationId = null;
-    private UserProfile myProfile;
+    private final List<Contact> allContacts = new ArrayList<>(); // List of all active conversations
+    private final List<User> mockAllUsers = new ArrayList<>();   // Database of all known users
+    private String currentConversationId = null;                 // ID of the currently open chat
+    private UserProfile myProfile;                               // The current user
 
     @Override
     public void start(Stage primaryStage) {
         primaryStage.setTitle("GroupSpeak");
 
+        // 1. Initialize Mock Data
         loadMockData();
 
+        // 2. Setup Main Layout
         root = new BorderPane();
         root.getStyleClass().add("root");
 
+        // 3. Create Key UI Regions
         sidebar = createSidebar();
         chatView = createChatPane();
         placeholderView = createPlaceholderPane();
 
+        // 4. Set Initial View (Sidebar + Placeholder)
         root.setLeft(sidebar);
         root.setCenter(placeholderView);
 
+        // 5. Apply CSS and Show Stage
         Scene scene = new Scene(root, 1100, 750);
-
         URL cssUrl = getClass().getResource("/styles.css");
         if (cssUrl != null) {
             scene.getStylesheets().add(cssUrl.toExternalForm());
@@ -151,12 +187,18 @@ public class App extends Application {
         primaryStage.setScene(scene);
         primaryStage.show();
 
+        // 6. Start Background Thread for incoming messages
         startMockBackgroundListener();
     }
 
+    /**
+     * Loads initial fake data for demonstration purposes.
+     * Creates a profile, a list of users, and some existing conversations.
+     */
     private void loadMockData() {
         myProfile = new UserProfile("john_doe", "john@example.com", "John Doe", "Online");
 
+        // Create random users
         User u1 = new User("101", "Alice Johnson", true);
         User u2 = new User("102", "Bob Smith", false);
         User u3 = new User("103", "Charlie Brown", true);
@@ -170,7 +212,7 @@ public class App extends Application {
         mockAllUsers.add(u4); mockAllUsers.add(u5); mockAllUsers.add(u6);
         mockAllUsers.add(u7); mockAllUsers.add(u8);
 
-        // Active Chats
+        // Create pre-existing chats
         Contact c1 = new Contact("1", "Alice Johnson", "#ef4444", null, false, true);
         c1.participants.add(u1);
         allContacts.add(c1);
@@ -185,13 +227,18 @@ public class App extends Application {
         allContacts.add(group);
     }
 
+    /**
+     * Simulates receiving messages from a background thread (server).
+     * If chat is open, it adds the message. If not, it increments unread count.
+     */
     private void startMockBackgroundListener() {
         Thread mockListener = new Thread(() -> {
             try {
+                // Wait 4 seconds then trigger an event
                 Thread.sleep(4000);
                 Platform.runLater(() -> {
                     if (!allContacts.isEmpty()) {
-                        // Find the currently open contact to make the demo feel alive
+                        // Check if the first mock conversation is currently open
                         Contact current = null;
                         if (currentConversationId != null) {
                             current = allContacts.stream()
@@ -201,14 +248,15 @@ public class App extends Application {
                         }
 
                         if (current != null) {
-                            // If chat is open, receive a message there
+                            // Determine a mock sender name
                             String sender = "Mock User";
                             if (!current.participants.isEmpty()) {
                                 sender = current.participants.get(0).displayName;
                             }
+                            // Add message directly to view
                             addMessage("Hey! This is a test message to show the sender name.", sender, false);
                         } else {
-                            // If no chat open, just increment Alice's unread
+                            // Background notification: update sidebar
                             Contact alice = allContacts.get(0);
                             alice.unreadCount++;
                             renderContactList(allContacts);
@@ -223,12 +271,24 @@ public class App extends Application {
         mockListener.start();
     }
 
-    // --- CUSTOM LIST CELL FACTORY (Avatar + Name) ---
+    // ==============================================================================================
+    //                                   CUSTOM UI FACTORIES
+    // ==============================================================================================
+
+    /**
+     * Creates a custom Cell Factory for ListViews displaying Users.
+     * Handles displaying the user's avatar, name, online status, and selection highlighting.
+     * * @param isMultiSelect If true, enables robust "click-to-toggle" logic for multi-selection.
+     * @return Callback to create ListCells.
+     */
     private Callback<ListView<User>, ListCell<User>> getUserListCellFactory(boolean isMultiSelect) {
         return listView -> new ListCell<User>() {
             {
+                // Listener to update colors immediately when selection changes
                 selectedProperty().addListener((obs, wasSelected, isSelected) -> updateVisualState(isSelected));
 
+                // Custom mouse handler to ensure clicking an item toggles it specifically
+                // without clearing other selections (essential for Multi-Select mode)
                 if (isMultiSelect) {
                     addEventFilter(MouseEvent.MOUSE_PRESSED, event -> {
                         if (!isEmpty() && getItem() != null) {
@@ -238,7 +298,7 @@ public class App extends Application {
                             } else {
                                 sm.select(getIndex());
                             }
-                            event.consume();
+                            event.consume(); // Prevent default behavior which might clear selection
                         }
                     });
                 }
@@ -252,6 +312,7 @@ public class App extends Application {
                     setGraphic(null);
                     setStyle("-fx-background-color: transparent;");
                 } else {
+                    // Build the graphic for the cell
                     HBox box = new HBox(10);
                     box.setAlignment(Pos.CENTER_LEFT);
 
@@ -272,6 +333,7 @@ public class App extends Application {
                 }
             }
 
+            // Updates the background and text color based on selection state
             private void updateVisualState(boolean isSelected) {
                 if (getItem() == null || getGraphic() == null) return;
 
@@ -280,7 +342,7 @@ public class App extends Application {
                 Label name = (Label) textInfo.getChildren().get(0);
 
                 if (isSelected) {
-                    setStyle("-fx-background-color: -selected-color;");
+                    setStyle("-fx-background-color: -selected-color;"); // Blue background
                     name.setStyle("-fx-text-fill: white; -fx-font-weight: bold;");
                 } else {
                     setStyle("-fx-background-color: transparent;");
@@ -290,40 +352,79 @@ public class App extends Application {
         };
     }
 
-    // --- NEW: Group Info Window (View Members / Add / Remove) ---
+    /**
+     * Logic to filter users. Checks if any part of their name (First or Last)
+     * starts with the search text provided.
+     */
+    private boolean searchMatches(User user, String searchText) {
+        if (searchText == null || searchText.isEmpty()) return true;
+        String[] nameParts = user.displayName.split("\\s+"); // Split full name into words
+        for (String part : nameParts) {
+            if (part.toLowerCase().startsWith(searchText.toLowerCase())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // ==============================================================================================
+    //                                      DIALOGS
+    // ==============================================================================================
+
+    /**
+     * Shows a dialog displaying group members. Allows adding new members or removing existing ones.
+     */
     private void showGroupInfoDialog(Contact group) {
         Dialog<Void> dialog = new Dialog<>();
         dialog.setTitle("Group Info");
         dialog.setHeaderText(null);
 
+        // Load Styles
         DialogPane pane = dialog.getDialogPane();
         pane.getStylesheets().add(getClass().getResource("/styles.css").toExternalForm());
         if (root.getStyleClass().contains("light-theme")) pane.getStyleClass().add("light-theme");
 
         pane.getButtonTypes().add(ButtonType.CLOSE);
 
+        // --- Dialog Layout ---
         VBox content = new VBox(15);
         content.setPadding(new Insets(20));
         content.setPrefWidth(420);
 
+        // Header: Avatar + Group Name
         StackPane avatar = createAvatarPane(group.name, group.colorHex, 60, 20, false);
         Label nameLabel = new Label(group.name);
         nameLabel.getStyleClass().add("dialog-text");
         nameLabel.setStyle("-fx-font-size: 18px;");
 
-        Label countLabel = new Label(group.participants.size() + " participants");
+        // --- CHANGED: Count includes "You" (+1) ---
+        Label countLabel = new Label((group.participants.size() + 1) + " participants");
         countLabel.getStyleClass().add("contact-sub");
 
         VBox headerBox = new VBox(5, avatar, nameLabel, countLabel);
         headerBox.setAlignment(Pos.CENTER);
 
+        // --- CHANGED: Construct list including "You" with actual Display Name ---
         ListView<User> membersList = new ListView<>();
-        membersList.setItems(FXCollections.observableArrayList(group.participants));
+
+        // Define a constant ID for the current user within this context to detect self-selection
+        final String MY_ID = "CURRENT_USER_ID";
+
+        // --- UPDATED: Display name format "Name (You)" ---
+        User me = new User(MY_ID, myProfile.displayName + " (You)", true);
+
+        // Combine "You" with the actual participants list
+        List<User> fullMemberList = new ArrayList<>();
+        fullMemberList.add(me);
+        fullMemberList.addAll(group.participants);
+
+        membersList.setItems(FXCollections.observableArrayList(fullMemberList));
         membersList.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
         membersList.setCellFactory(getUserListCellFactory(true));
         membersList.getStyleClass().add("dialog-list-view");
         membersList.setPrefHeight(250);
 
+        // Buttons
         Button addBtn = new Button("Add Participant");
         addBtn.getStyleClass().add("send-btn");
         addBtn.setMaxWidth(Double.MAX_VALUE);
@@ -332,8 +433,12 @@ public class App extends Application {
 
         addBtn.setOnAction(e -> {
             showAddParticipantDialog(group);
-            membersList.setItems(FXCollections.observableArrayList(group.participants));
-            countLabel.setText(group.participants.size() + " participants");
+            // Refresh list keeping "You" at the top
+            List<User> updatedList = new ArrayList<>();
+            updatedList.add(me);
+            updatedList.addAll(group.participants);
+            membersList.setItems(FXCollections.observableArrayList(updatedList));
+            countLabel.setText((group.participants.size() + 1) + " participants");
         });
 
         Button removeBtn = new Button("Remove Selected");
@@ -342,6 +447,7 @@ public class App extends Application {
         removeBtn.setPrefHeight(40);
         HBox.setHgrow(removeBtn, Priority.ALWAYS);
 
+        // Disable remove button if nothing is selected
         removeBtn.setDisable(true);
         membersList.getSelectionModel().getSelectedItems().addListener((ListChangeListener<User>) c ->
                 removeBtn.setDisable(membersList.getSelectionModel().getSelectedItems().isEmpty())
@@ -350,12 +456,28 @@ public class App extends Application {
         removeBtn.setOnAction(e -> {
             List<User> selected = new ArrayList<>(membersList.getSelectionModel().getSelectedItems());
             if (!selected.isEmpty()) {
-                group.participants.removeAll(selected);
-                membersList.setItems(FXCollections.observableArrayList(group.participants));
-                countLabel.setText(group.participants.size() + " participants");
-                updateChatHeader(group);
+                // --- ADDED: Check if the user is removing themselves (Leaving Group) ---
+                boolean removingSelf = selected.stream().anyMatch(u -> u.id.equals(MY_ID));
 
-                removeBtn.setDisable(true);
+                if (removingSelf) {
+                    // User is leaving the group -> Close dialog and Delete Conversation
+                    dialog.setResult(null);
+                    dialog.close();
+                    deleteConversation(group);
+                } else {
+                    // Removing other participants
+                    group.participants.removeAll(selected);
+
+                    // Refresh list keeping "You" at the top
+                    List<User> updatedList = new ArrayList<>();
+                    updatedList.add(me);
+                    updatedList.addAll(group.participants);
+                    membersList.setItems(FXCollections.observableArrayList(updatedList));
+                    countLabel.setText((group.participants.size() + 1) + " participants");
+                    updateChatHeader(group);
+
+                    removeBtn.setDisable(true);
+                }
             }
         });
 
@@ -369,6 +491,10 @@ public class App extends Application {
         dialog.showAndWait();
     }
 
+    /**
+     * Shows the dialog to create a NEW conversation (One-to-One or Group).
+     * Includes search functionality and validation logic.
+     */
     private void showNewConversationDialog() {
         Dialog<Contact> dialog = new Dialog<>();
         dialog.setTitle("New Conversation");
@@ -386,7 +512,7 @@ public class App extends Application {
         grid.setVgap(15);
         grid.setPadding(new Insets(20, 30, 20, 20));
 
-        // 1. Radio Buttons
+        // 1. Conversation Type Toggle
         ToggleGroup typeGroup = new ToggleGroup();
         RadioButton rbOneToOne = new RadioButton("One-to-One Conversation");
         rbOneToOne.setToggleGroup(typeGroup);
@@ -399,7 +525,12 @@ public class App extends Application {
 
         HBox radioBox = new HBox(15, rbOneToOne, rbGroup);
 
-        // 2. Common ListView for selecting people (Single for DM, Multi for Group)
+        // 2. Search Field
+        TextField userSearchField = new TextField();
+        userSearchField.setPromptText("Search online users...");
+        userSearchField.getStyleClass().add("search-field");
+
+        // 3. User Selection List
         Label selectUserLabel = new Label("Select Person:");
         selectUserLabel.getStyleClass().add("dialog-text");
 
@@ -408,97 +539,120 @@ public class App extends Application {
         userListView.setPrefWidth(300);
         userListView.getStyleClass().add("dialog-list-view");
 
-        // 3. Group Name Field
+        // 4. Group Name Input
         Label groupNameLabel = new Label("Group Name:");
         groupNameLabel.getStyleClass().add("dialog-text");
         TextField groupNameField = new TextField();
         groupNameField.setPromptText("Enter group name...");
         groupNameField.getStyleClass().add("search-field");
 
-        // Logic to switch between modes
+        // --- Data Binding & Filtering ---
+        ObservableList<User> baseList = FXCollections.observableArrayList();
+        FilteredList<User> filteredList = new FilteredList<>(baseList, p -> true);
+        userListView.setItems(filteredList);
+
+        // Real-time search filtering
+        userSearchField.textProperty().addListener((obs, oldVal, newVal) -> {
+            filteredList.setPredicate(user -> searchMatches(user, newVal));
+        });
+
+        // --- Validation Logic (Enabling "Create" button) ---
+        Button createBtn = (Button) dialogPane.lookupButton(createButtonType);
+        createBtn.setDisable(true);
+
+        Runnable validate = () -> {
+            int selectedCount = userListView.getSelectionModel().getSelectedItems().size();
+            if (rbOneToOne.isSelected()) {
+                // One-to-One: Must select exactly 1 person
+                createBtn.setDisable(selectedCount != 1);
+            } else {
+                // Group: Must select AT LEAST 2 people (You + 2 others = 3 minimum) AND have a name
+                boolean hasName = !groupNameField.getText().trim().isEmpty();
+                createBtn.setDisable(selectedCount < 2 || !hasName);
+            }
+        };
+
+        // Attach listeners to trigger validation
+        userListView.getSelectionModel().getSelectedItems().addListener((ListChangeListener<User>) c -> validate.run());
+        groupNameField.textProperty().addListener((obs, old, val) -> validate.run());
+
+        // --- Mode Switching Logic (1-on-1 vs Group) ---
         Runnable setupForOneToOne = () -> {
+            // Remove group fields
             grid.getChildren().removeAll(groupNameLabel, groupNameField);
             selectUserLabel.setText("Select Person:");
 
-            // Filter: Online & Not already chatted with
+            // Data: Online & Not already chatted with
             List<User> available = mockAllUsers.stream()
                     .filter(u -> u.isOnline)
                     .filter(u -> allContacts.stream().noneMatch(c -> c.name.equals(u.displayName)))
                     .collect(Collectors.toList());
 
-            userListView.setItems(FXCollections.observableArrayList(available));
+            baseList.setAll(available);
+
             userListView.getSelectionModel().setSelectionMode(SelectionMode.SINGLE);
-            userListView.setCellFactory(getUserListCellFactory(false)); // False = No custom click toggle
+            userListView.setCellFactory(getUserListCellFactory(false));
+            userListView.getSelectionModel().clearSelection();
 
             if (available.isEmpty()) userListView.setPlaceholder(new Label("No new online users."));
+            validate.run();
         };
 
         Runnable setupForGroup = () -> {
-            if (!grid.getChildren().contains(groupNameField)) {
+            // Add group fields if missing
+            if (!grid.getChildren().contains(groupNameLabel)) {
                 grid.add(groupNameLabel, 0, 1);
                 grid.add(groupNameField, 1, 1);
             }
             selectUserLabel.setText("Participants (Online):");
 
-            // --- CHANGED: Filter for online users only ---
+            // Data: All Online users
             List<User> onlineUsers = mockAllUsers.stream()
                     .filter(u -> u.isOnline)
                     .collect(Collectors.toList());
 
-            userListView.setItems(FXCollections.observableArrayList(onlineUsers));
+            baseList.setAll(onlineUsers);
+
             userListView.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
-            userListView.setCellFactory(getUserListCellFactory(true)); // True = Click to toggle enabled
+            userListView.setCellFactory(getUserListCellFactory(true));
+            userListView.getSelectionModel().clearSelection();
 
             if (onlineUsers.isEmpty()) userListView.setPlaceholder(new Label("No online users found."));
+            validate.run();
         };
 
-        // Initial Layout
+        // Add components to grid
         grid.add(radioBox, 0, 0, 2, 1);
         grid.add(selectUserLabel, 0, 2);
-        grid.add(userListView, 1, 2);
+        grid.add(userSearchField, 1, 2); // Search field
+        grid.add(userListView, 1, 3);    // User list
 
-        setupForOneToOne.run(); // Default state
+        setupForOneToOne.run(); // Initial state
 
-        // Toggle Listeners
+        // Handle Toggle Switch
         rbOneToOne.setOnAction(e -> {
+            userSearchField.clear();
             setupForOneToOne.run();
             dialog.getDialogPane().getScene().getWindow().sizeToScene();
         });
         rbGroup.setOnAction(e -> {
+            userSearchField.clear();
             setupForGroup.run();
             dialog.getDialogPane().getScene().getWindow().sizeToScene();
         });
 
         dialogPane.setContent(grid);
 
-        Button createBtn = (Button) dialogPane.lookupButton(createButtonType);
-        createBtn.setDisable(true);
-
-        // Validation
-        userListView.getSelectionModel().selectedItemProperty().addListener((obs, old, val) -> {
-            boolean hasSelection = !userListView.getSelectionModel().getSelectedItems().isEmpty();
-            if (rbOneToOne.isSelected()) {
-                createBtn.setDisable(!hasSelection);
-            } else {
-                boolean hasName = !groupNameField.getText().trim().isEmpty();
-                createBtn.setDisable(!hasSelection || !hasName);
-            }
-        });
-
-        groupNameField.textProperty().addListener((obs, old, val) -> {
-            if (rbGroup.isSelected()) {
-                boolean hasSelection = !userListView.getSelectionModel().getSelectedItems().isEmpty();
-                createBtn.setDisable(val.trim().isEmpty() || !hasSelection);
-            }
-        });
-
+        // Result Converter: Turns the dialog result into a Contact object
         dialog.setResultConverter(btn -> {
             if (btn == createButtonType) {
                 if (rbOneToOne.isSelected()) {
                     User u = userListView.getSelectionModel().getSelectedItem();
-                    Contact c = new Contact(String.valueOf(System.currentTimeMillis()), u.displayName, "#6366f1", null, false, true);
-                    c.participants.add(u);
-                    return c;
+                    if (u != null) {
+                        Contact c = new Contact(String.valueOf(System.currentTimeMillis()), u.displayName, "#6366f1", null, false, true);
+                        c.participants.add(u);
+                        return c;
+                    }
                 } else {
                     String name = groupNameField.getText();
                     Contact c = new Contact(String.valueOf(System.currentTimeMillis()), name, "#10b981", null, true, true);
@@ -511,12 +665,16 @@ public class App extends Application {
 
         Optional<Contact> result = dialog.showAndWait();
         result.ifPresent(contact -> {
-            allContacts.add(0, contact);
+            allContacts.add(0, contact); // Add to top
             renderContactList(allContacts);
             openChat(contact);
         });
     }
 
+    /**
+     * Shows a dialog to add new participants to an existing group.
+     * Filters list to show only ONLINE users who are NOT ALREADY in the group.
+     */
     private void showAddParticipantDialog(Contact group) {
         Dialog<List<User>> dialog = new Dialog<>();
         dialog.setTitle("Add Participants");
@@ -529,16 +687,27 @@ public class App extends Application {
         ButtonType addButtonType = new ButtonType("Add", ButtonBar.ButtonData.OK_DONE);
         dialogPane.getButtonTypes().addAll(addButtonType, ButtonType.CANCEL);
 
-        // --- CHANGED: Filter for online users who are NOT already in the group ---
+        // Filter: Online AND Not in group
         List<User> available = mockAllUsers.stream()
                 .filter(u -> u.isOnline)
                 .filter(u -> group.participants.stream().noneMatch(p -> p.id.equals(u.id)))
                 .collect(Collectors.toList());
 
+        // Search Field
+        TextField searchField = new TextField();
+        searchField.setPromptText("Search users...");
+        searchField.getStyleClass().add("search-field");
+
+        // Filtered List binding
+        FilteredList<User> filteredList = new FilteredList<>(FXCollections.observableArrayList(available), p -> true);
+        searchField.textProperty().addListener((obs, oldVal, newVal) -> {
+            filteredList.setPredicate(user -> searchMatches(user, newVal));
+        });
+
         ListView<User> listView = new ListView<>();
-        listView.setItems(FXCollections.observableArrayList(available));
+        listView.setItems(filteredList);
         listView.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
-        listView.setCellFactory(getUserListCellFactory(true)); // Click to toggle
+        listView.setCellFactory(getUserListCellFactory(true));
         listView.setPrefHeight(200);
         listView.getStyleClass().add("dialog-list-view");
 
@@ -546,7 +715,7 @@ public class App extends Application {
             listView.setPlaceholder(new Label("No other online users available."));
         }
 
-        VBox content = new VBox(10, new Label("Select users:"), listView);
+        VBox content = new VBox(10, new Label("Select users:"), searchField, listView);
         content.setPadding(new Insets(20));
         dialogPane.setContent(content);
 
@@ -559,6 +728,7 @@ public class App extends Application {
         result.ifPresent(users -> {
             if(!users.isEmpty()) {
                 group.participants.addAll(users);
+                // Refresh header if currently viewing this group
                 if (currentConversationId != null && currentConversationId.equals(group.id)) {
                     updateChatHeader(group);
                 }
@@ -566,8 +736,13 @@ public class App extends Application {
         });
     }
 
-    // --- GENERAL UI METHODS ---
+    // ==============================================================================================
+    //                                   MAIN UI CONSTRUCTION
+    // ==============================================================================================
 
+    /**
+     * Builds and shows the User Profile view (replaces the main chat view).
+     */
     private void showProfileView() {
         VBox profileView = new VBox(20);
         profileView.setAlignment(Pos.CENTER);
@@ -615,6 +790,9 @@ public class App extends Application {
         grid.add(v, 1, row);
     }
 
+    /**
+     * Restores the standard view (Sidebar + Chat) after viewing the profile.
+     */
     private void restoreMainView() {
         root.setLeft(sidebar);
         if (currentConversationId != null) {
@@ -624,11 +802,15 @@ public class App extends Application {
         }
     }
 
+    /**
+     * Creates the Sidebar containing the search bar and the list of conversations.
+     */
     private VBox createSidebar() {
         VBox sidebarBox = new VBox();
         sidebarBox.getStyleClass().add("sidebar");
         sidebarBox.setPrefWidth(340);
 
+        // Sidebar Header (Title + Buttons)
         HBox header = new HBox(15);
         header.setAlignment(Pos.CENTER_LEFT);
         header.setPadding(new Insets(20, 20, 10, 20));
@@ -649,6 +831,7 @@ public class App extends Application {
         profileBtn.setTooltip(new Tooltip("My Profile"));
         profileBtn.setOnAction(e -> showProfileView());
 
+        // Theme Switcher Logic
         ToggleButton themeSwitch = new ToggleButton("☀");
         themeSwitch.getStyleClass().add("icon-btn");
         themeSwitch.setOnAction(e -> {
@@ -663,6 +846,7 @@ public class App extends Application {
 
         header.getChildren().addAll(appTitle, spacer, newChatBtn, profileBtn, themeSwitch);
 
+        // Sidebar Search Bar
         HBox searchContainer = new HBox();
         searchContainer.setPadding(new Insets(0, 20, 10, 20));
         TextField searchField = new TextField();
@@ -673,6 +857,7 @@ public class App extends Application {
         searchField.textProperty().addListener((obs, old, newVal) -> filterContacts(newVal));
         searchContainer.getChildren().add(searchField);
 
+        // Contact List Scroll Area
         contactListContainer = new VBox(5);
         contactListContainer.getStyleClass().add("contact-list");
         contactListContainer.setPadding(new Insets(5, 10, 5, 10));
@@ -682,6 +867,7 @@ public class App extends Application {
         contactScroll.setFitToWidth(true);
         VBox.setVgrow(contactScroll, Priority.ALWAYS);
 
+        // Footer (Logout)
         HBox footer = new HBox(10);
         footer.setAlignment(Pos.CENTER_LEFT);
         footer.setPadding(new Insets(15, 20, 15, 20));
@@ -701,6 +887,9 @@ public class App extends Application {
         return sidebarBox;
     }
 
+    /**
+     * Filters the conversation list in the sidebar.
+     */
     private void filterContacts(String searchText) {
         if (searchText == null || searchText.isEmpty()) {
             renderContactList(allContacts);
@@ -712,6 +901,9 @@ public class App extends Application {
         }
     }
 
+    /**
+     * Renders the list of conversations (Contacts) into the sidebar.
+     */
     private void renderContactList(List<Contact> contactsToDisplay) {
         contactListContainer.getChildren().clear();
 
@@ -733,12 +925,14 @@ public class App extends Application {
 
             contactBox.getChildren().addAll(avatarPane, infoBox);
 
+            // Unread Badge
             if (contact.unreadCount > 0) {
                 Label unreadBadge = new Label(String.valueOf(contact.unreadCount));
                 unreadBadge.getStyleClass().add("unread-badge");
                 contactBox.getChildren().add(unreadBadge);
             }
 
+            // Context Menu (Right-click)
             ContextMenu contextMenu = new ContextMenu();
             MenuItem deleteItem = new MenuItem("Delete Conversation");
             deleteItem.setOnAction(e -> deleteConversation(contact));
@@ -747,6 +941,7 @@ public class App extends Application {
             contactBox.setOnContextMenuRequested(e ->
                     contextMenu.show(contactBox, e.getScreenX(), e.getScreenY()));
 
+            // Click Handler
             contactBox.setOnMouseClicked(e -> openChat(contact));
 
             if (currentConversationId != null && currentConversationId.equals(contact.id)) {
@@ -766,6 +961,9 @@ public class App extends Application {
         renderContactList(allContacts);
     }
 
+    /**
+     * Helper to create the Circular Avatar component.
+     */
     private StackPane createAvatarPane(String name, String colorHex, double size, double fontSize, boolean isOnline) {
         StackPane stack = new StackPane();
         stack.setPrefSize(size, size);
@@ -807,11 +1005,15 @@ public class App extends Application {
         return box;
     }
 
+    /**
+     * Creates the main chat area (Messages + Input).
+     */
     private VBox createChatPane() {
         VBox pane = new VBox();
         pane.getStyleClass().add("chat-pane");
         VBox.setVgrow(pane, Priority.ALWAYS);
 
+        // Top Header
         HBox topBar = new HBox(15);
         topBar.getStyleClass().add("top-bar");
         topBar.setPrefHeight(70);
@@ -821,7 +1023,6 @@ public class App extends Application {
 
         currentChatAvatarPane = createAvatarPane("?", "#3f3f46", 40, 14, false);
 
-        // --- CHANGED: Revert to VBox to place names below group name ---
         VBox titleBox = new VBox(2);
         titleBox.setAlignment(Pos.CENTER_LEFT);
 
@@ -830,21 +1031,19 @@ public class App extends Application {
 
         currentChatSubtitle = new Label("");
         currentChatSubtitle.getStyleClass().add("contact-sub");
-        // Optional: Ensure text doesn't wrap weirdly if it gets too long
         currentChatSubtitle.setMinWidth(Control.USE_PREF_SIZE);
 
         titleBox.getChildren().addAll(currentChatLabel, currentChatSubtitle);
 
-        // Spacer
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        // Actions
         chatHeaderActions = new HBox(10);
         chatHeaderActions.setAlignment(Pos.CENTER_RIGHT);
 
         topBar.getChildren().addAll(currentChatAvatarPane, titleBox, spacer, chatHeaderActions);
 
+        // Message Scroll Area
         chatArea = new VBox(12);
         chatArea.getStyleClass().add("chat-area");
         chatArea.setPadding(new Insets(20));
@@ -884,6 +1083,13 @@ public class App extends Application {
         return box;
     }
 
+    // ==============================================================================================
+    //                                   CHAT LOGIC
+    // ==============================================================================================
+
+    /**
+     * Opens a specific conversation, updates the header, and clears unread count.
+     */
     private void openChat(Contact contact) {
         this.currentConversationId = contact.id;
 
@@ -902,8 +1108,6 @@ public class App extends Application {
         currentChatLabel.setText(contact.name);
 
         StackPane newAvatar = createAvatarPane(contact.name, contact.colorHex, 40, 14, false);
-        // Header structure: Avatar, TitleBox (HBox), Spacer, Actions
-        // Avatar is at index 0
         HBox topBar = (HBox) currentChatLabel.getParent().getParent();
         topBar.getChildren().set(0, newAvatar);
 
@@ -911,7 +1115,6 @@ public class App extends Application {
 
         if (contact.isGroup) {
             String names = contact.getParticipantNames();
-            // --- CHANGED: Added "You" to the start of the list ---
             currentChatSubtitle.setText(names.isEmpty() ? "You" : "You, " + names);
 
             Button infoBtn = new Button("⋮");
@@ -920,7 +1123,6 @@ public class App extends Application {
             infoBtn.setOnAction(e -> showGroupInfoDialog(contact));
             chatHeaderActions.getChildren().add(infoBtn);
         } else {
-            // --- CHANGED: Removed extra spaces for vertical layout ---
             currentChatSubtitle.setText(contact.isOnline ? "Online" : "Offline");
         }
     }
@@ -934,45 +1136,47 @@ public class App extends Application {
         }
     }
 
-    // --- CHANGED: Updated signature to accept sender name ---
+    /**
+     * Adds a message bubble to the chat area.
+     * Handles styling distinctions between sent/received messages and sender name display.
+     * * @param text The message content
+     * @param senderName Name of the sender (displayed if group chat + received message)
+     * @param isSentByMe Determines alignment and color (Right/Blue vs Left/Gray)
+     */
     private void addMessage(String text, String senderName, boolean isSentByMe) {
-        // 1. Container for the whole row (Alignment)
         HBox messageBox = new HBox();
         messageBox.setPadding(new Insets(2, 0, 2, 0));
 
-        // 2. Container for the bubble + name (Vertical stack)
         VBox bubbleContainer = new VBox(2);
 
-        // 3. Sender Name Label (Only for received messages in groups)
         Contact currentChat = allContacts.stream()
                 .filter(c -> c.id.equals(currentConversationId))
                 .findFirst()
                 .orElse(null);
 
-        // Only show name if: received, is a group chat, and we have a name
+        // Logic: Show sender name only in Groups, for received messages
         if (!isSentByMe && currentChat != null && currentChat.isGroup && senderName != null) {
             Label nameLabel = new Label(senderName);
-            // WhatsApp style: small, bold, distinct color
             String nameColor = getNameColor(senderName);
             nameLabel.setStyle("-fx-text-fill: " + nameColor + "; -fx-font-size: 11px; -fx-font-weight: bold; -fx-padding: 0 5 0 5;");
             bubbleContainer.getChildren().add(nameLabel);
         }
 
-        // 4. Message Bubble
         Label messageLabel = new Label(text);
         messageLabel.setWrapText(true);
         messageLabel.setMaxWidth(500);
 
         if (isSentByMe) {
             messageLabel.getStyleClass().add("message-sent");
-            bubbleContainer.setAlignment(Pos.CENTER_RIGHT); // Content aligns right
-            messageBox.setAlignment(Pos.CENTER_RIGHT);      // Box aligns right
+            bubbleContainer.setAlignment(Pos.CENTER_RIGHT);
+            messageBox.setAlignment(Pos.CENTER_RIGHT);
         } else {
             messageLabel.getStyleClass().add("message-received");
             bubbleContainer.setAlignment(Pos.CENTER_LEFT);
             messageBox.setAlignment(Pos.CENTER_LEFT);
         }
 
+        // Copy functionality context menu
         ContextMenu contextMenu = new ContextMenu();
         MenuItem copyItem = new MenuItem("Copy");
         copyItem.setOnAction(e -> {
@@ -989,24 +1193,23 @@ public class App extends Application {
         chatArea.heightProperty().addListener((o, old, n) -> chatScrollPane.setVvalue(1.0));
     }
 
-    // --- Helper for consistent name colors ---
+    /**
+     * Generates a consistent color based on the hash of the sender's name.
+     * Ensures "Alice" always gets the same color, distinct from "Bob".
+     */
     private String getNameColor(String name) {
         if (name == null) return "#8b5cf6";
         int hash = name.hashCode();
-        // A simple palette of readable colors
         String[] colors = {
-                "#ef4444", // red
-                "#3b82f6", // blue
-                "#10b981", // green
-                "#f59e0b", // amber
-                "#8b5cf6", // purple
-                "#ec4899", // pink
-                "#06b6d4", // cyan
-                "#f97316"  // orange
+                "#ef4444", "#3b82f6", "#10b981", "#f59e0b",
+                "#8b5cf6", "#ec4899", "#06b6d4", "#f97316"
         };
         return colors[Math.abs(hash) % colors.length];
     }
 
+    /**
+     * Displays a logout confirmation dialog.
+     */
     private void showLogoutDialog() {
         Dialog<Boolean> dialog = new Dialog<>();
         dialog.setTitle("Sign Out");
@@ -1033,7 +1236,7 @@ public class App extends Application {
         dialogPane.getButtonTypes().addAll(yesType, noType);
 
         Button yesBtn = (Button) dialogPane.lookupButton(yesType);
-        yesBtn.getStyleClass().add("logout-btn"); // Red outline style
+        yesBtn.getStyleClass().add("logout-btn");
 
         Button noBtn = (Button) dialogPane.lookupButton(noType);
         noBtn.getStyleClass().add("simple-btn");
@@ -1048,6 +1251,7 @@ public class App extends Application {
         });
     }
 
+    // Helper to get initials from a name (e.g., "Alice Johnson" -> "AJ")
     private String getInitials(String name) {
         if (name == null || name.isEmpty()) return "?";
         String[] parts = name.trim().split("\\s+");
